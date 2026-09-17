@@ -1,0 +1,186 @@
+    ${state.reader?readerHTML():""}
+    <div class="toast-stack" id="toast-stack"></div>
+  </div>`;
+}
+
+function navItem(id,label,icon,count){
+  return `<button class="nav-item ${state.view===id?"active":""}" data-nav="${id}">
+    <span class="nav-icon">${I(icon)}</span><span>${label}</span>${count!==undefined?`<span class="count">${count}</span>`:""}
+  </button>`;
+}
+
+function topbarHTML(){
+  return `<header class="topbar">
+    <button class="icon-btn mobile-menu" data-action="open-nav" title="Menu">${I("menu")}</button>
+    <div class="top-title">${viewTitle()}</div><div class="top-subtitle">${state.books.filter(b=>!b.trashed).length} items</div>
+    <div class="top-spacer"></div>
+    <button class="icon-btn" data-action="focus-search" title="Search">${I("search")}</button>
+    <button class="icon-btn" data-action="toggle-display" title="Change view">${I(state.display==="list"?"grid":"list")}</button>
+    <button class="icon-btn" data-action="cycle-sort" title="Sort">${I("sort")}</button>
+    <button class="icon-btn" data-action="app-settings" title="Settings">${I("settings")}</button>
+  </header>`;
+}
+
+function contentHTML(){
+  if(["authors","series","collections","formats","folders","downloads"].includes(state.view)) return groupedHTML();
+  const list=navFilter(state.books);
+  const reading=state.books.filter(b=>!b.trashed&&b.status==="reading").sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,8);
+  const showShelf=state.view==="all" && !state.query && reading.length;
+  return `
+    ${showShelf?`<div class="section-head"><div><h2>Continue reading</h2><p>Pick up where you left off</p></div></div>
+    <div class="shelf">${reading.map(miniBookHTML).join("")}</div>`:""}
+    <div class="section-head"><div><h2>${state.view==="all"?"Library":viewTitle()}</h2><p>${list.length} ${list.length===1?"document":"documents"} · sorted by ${state.sort}</p></div><div class="grow"></div></div>
+    <div class="search-strip">${I("search")}<input id="library-search" autocomplete="off" placeholder="Search title, author, series or format…" value="${escapeHTML(state.query)}"><span class="kbd">/</span></div>
+    ${state.display==="list"?`<div class="book-list">${list.slice(0,state.visibleCount).map(bookRowHTML).join("")}</div>`:`<div class="grid-books">${list.slice(0,state.visibleCount).map(gridBookHTML).join("")}</div>`}
+    ${list.length===0?'<div class="empty"><div class="empty-icon">⌕</div><strong>No books found</strong><div>Try another filter or import a document.</div></div>':""}
+    ${list.length>state.visibleCount?'<div class="empty"><button class="secondary-btn" data-action="load-more">Load more</button></div>':""}
+  `;
+}
+
+function miniBookHTML(b){
+  return `<article class="mini-book clickable" data-open="${b.id}">${coverHTML(b)}
+    <div class="mini-title">${escapeHTML(b.title)}</div><div class="mini-meta">${escapeHTML(b.author||"Unknown")}</div>
+    <div class="mini-progress"><i style="width:${b.progress||0}%"></i></div>
+  </article>`;
+}
+function bookRowHTML(b){
+  return `<article class="book-row" data-id="${b.id}">
+    <div class="clickable" data-open="${b.id}">${coverHTML(b)}</div>
+    <div class="book-main clickable" data-open="${b.id}">
+      <div class="book-title">${escapeHTML(b.title)}</div>
+      <div class="book-author">${escapeHTML(b.author||"Unknown author")}</div>
+      <div class="book-meta">${escapeHTML(b.format||"BOOK")} · ${escapeHTML(b.size||"Local file")} · ${fmtDate(b.updatedAt||Date.now())}</div>
+      <div class="progress-wrap"><div class="progress-label"><span>${statusText(b)}</span><span>${Math.round(b.progress||0)}%</span></div><div class="progress-line"><i style="width:${b.progress||0}%"></i></div></div>
+    </div>
+    <div class="book-actions">
+      <button class="action-btn ${b.favorite?"active":""}" data-fav="${b.id}" title="Favorite">${I("star")}</button>
+      <button class="action-btn ${b.status==="to-read"?"active":""}" data-status="${b.id}:to-read" title="To read">${I("clock")}</button>
+      <button class="action-btn ${b.status==="read"?"active":""}" data-status="${b.id}:read" title="Have read">${I("check")}</button>
+      <button class="action-btn" data-menu="${b.id}" title="More">${I("more")}</button>
+    </div>
+  </article>`;
+}
+function gridBookHTML(b){
+  return `<article class="grid-book" data-id="${b.id}">
+    <div class="clickable" data-open="${b.id}">${coverHTML(b)}</div>
+    <div class="book-title clickable" data-open="${b.id}">${escapeHTML(b.title)}</div>
+    <div class="book-author">${escapeHTML(b.author||"Unknown author")}</div>
+    <div class="progress-line"><i style="width:${b.progress||0}%"></i></div>
+  </article>`;
+}
+function statusText(b){
+  if(b.status==="read") return "Finished";
+  if(b.status==="to-read") return "To read";
+  return b.progress ? "Reading" : "Not started";
+}
+
+function groupedHTML(){
+  const active=state.books.filter(b=>!b.trashed);
+  let groups=[];
+  if(state.view==="authors"){
+    const m=groupBy(active,b=>b.author||"Unknown author");
+    groups=[...m].map(([k,v])=>({name:k,subtitle:`${v.length} books`,books:v}));
+  } else if(state.view==="series"){
+    const m=groupBy(active.filter(b=>b.series),b=>b.series);
+    groups=[...m].map(([k,v])=>({name:k,subtitle:`${v.length} titles`,books:v}));
+  } else if(state.view==="collections"){
+    const m=new Map();
+    active.forEach(b=>(b.collections||[]).forEach(c=>{ if(!m.has(c))m.set(c,[]);m.get(c).push(b); }));
+    groups=[...m].map(([k,v])=>({name:k,subtitle:`${v.length} items`,books:v}));
+  } else if(state.view==="formats"){
+    const m=groupBy(active,b=>b.format||"Unknown");
+    groups=[...m].map(([k,v])=>({name:k,subtitle:`${v.length} files`,books:v}));
+  } else if(state.view==="downloads"){
+    groups=[{name:"Imported files",subtitle:`${active.filter(b=>b.imported).length} items`,books:active.filter(b=>b.imported)}];
+  } else {
+    groups=[{name:"Browser library",subtitle:"Files are stored locally in IndexedDB",books:active}];
+  }
+  groups.sort((a,b)=>a.name.localeCompare(b.name));
+  return `<div class="section-head"><div><h2>${viewTitle()}</h2><p>Organize and browse your library</p></div></div>
+  <div class="book-list">${groups.length?groups.map(g=>`
+    <article class="book-row clickable" style="min-height:96px;grid-template-columns:58px minmax(0,1fr) auto" data-group="${escapeHTML(g.name)}">
+      <div style="width:58px;height:70px;border-radius:9px;background:#dceced;color:#136c78;display:grid;place-items:center">${I(state.view==="authors"?"person":state.view==="formats"?"stack":"books")}</div>
+      <div class="book-main"><div class="book-title">${escapeHTML(g.name)}</div><div class="book-author">${escapeHTML(g.subtitle)}</div><div class="book-meta">${g.books.slice(0,3).map(b=>escapeHTML(b.title)).join(" · ")}</div></div>
+      <div class="book-actions">${I("chevron")}</div>
+    </article>`).join(""):'<div class="empty">No groups yet.</div>'}</div>`;
+}
+function groupBy(arr,fn){const m=new Map();for(const x of arr){const k=fn(x);if(!m.has(k))m.set(k,[]);m.get(k).push(x)}return m;}
+
+function modalHTML(){
+  if(state.modal.type==="import") return `<div class="modal-backdrop" data-action="close-modal"><div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head"><h3>Import books & documents</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-modal">${I("close")}</button></div>
+    <div class="modal-body">
+      <label class="import-drop" id="import-drop">
+        ${I("upload")}<strong>Drop files here or click to browse</strong>
+        <p>Fast browser import for EPUB, PDF, TXT, MD and HTML. Other formats can be added to the library as file records.</p>
+        <input id="file-input" type="file" multiple hidden accept=".epub,.pdf,.txt,.md,.html,.htm,.doc,.docx,.rtf,.odt,.mobi,.azw3,.fb2,.cbz,.cbr">
+      </label>
+      <div class="import-list">Files remain in your browser storage. Nothing is uploaded to a server.</div>
+    </div></div></div>`;
+  if(state.modal.type==="details"){
+    const b=state.books.find(x=>x.id===state.modal.id); if(!b)return "";
+    return `<div class="modal-backdrop" data-action="close-modal"><div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>About document</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-modal">${I("close")}</button></div>
+      <div class="modal-body">
+        <div class="details-grid">
+          ${coverHTML(b)}
+          <div class="details-info"><h2>${escapeHTML(b.title)}</h2><div class="author">${escapeHTML(b.author||"Unknown author")}</div><div class="book-meta" style="margin-top:10px">${escapeHTML(b.format||"BOOK")} · ${escapeHTML(b.size||"Local file")}</div>
+            <div class="detail-actions"><button class="primary-btn" data-open="${b.id}">${I("read")} Read</button><button class="secondary-btn" data-fav="${b.id}">${I("star")} ${b.favorite?"Unfavorite":"Favorite"}</button></div>
+          </div>
+          <div class="details-desc">${escapeHTML(b.description||"Local document imported into the browser library.")}</div>
+        </div>
+      </div></div></div>`;
+  }
+  if(state.modal.type==="settings"){
+    return `<div class="modal-backdrop" data-action="close-modal"><div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-head"><h3>App settings</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-modal">${I("close")}</button></div>
+      <div class="modal-body"><div class="settings-section"><div class="settings-label">Library</div>
+      <div class="setting-row"><label>Default view</label><select id="default-display"><option value="list" ${state.display==="list"?"selected":""}>List</option><option value="grid" ${state.display==="grid"?"selected":""}>Grid</option></select></div>
+      <div class="setting-row"><label>Sort order</label><select id="default-sort"><option value="recent" ${state.sort==="recent"?"selected":""}>Recent</option><option value="title" ${state.sort==="title"?"selected":""}>Title</option><option value="author" ${state.sort==="author"?"selected":""}>Author</option><option value="progress" ${state.sort==="progress"?"selected":""}>Progress</option></select></div>
+      </div><p style="font-size:12px;color:var(--muted)">The prototype keeps library metadata, reading progress, bookmarks, notes, highlights, and imported documents in this browser.</p></div></div></div>`;
+  }
+  return "";
+}
+
+function contextMenuHTML(){
+  const b=state.books.find(x=>x.id===state.menu.id); if(!b)return "";
+  return `<div class="context-menu" style="left:${state.menu.x}px;top:${state.menu.y}px">
+    <button data-detail="${b.id}">${I("info")} About document</button>
+    <button data-open="${b.id}">${I("read")} Read</button>
+    <button data-status="${b.id}:to-read">${I("clock")} To Read</button>
+    <button data-status="${b.id}:read">${I("check")} Have Read</button>
+    <button data-trash="${b.id}">${I("trash")} ${b.trashed?"Restore":"Move to Trash"}</button>
+  </div>`;
+}
+
+function readerHTML(){
+  const b=state.books.find(x=>x.id===state.reader.id); if(!b)return "";
+  const s=state.readerSettings;
+  const isPdf=!!b.blob && (b.format||"").toUpperCase()==="PDF";
+  return `<div class="reader reader-${s.theme}" data-reader-id="${b.id}">
+    <div class="reader-toolbar">
+      <button class="icon-btn" data-action="close-reader" title="Back">${I("back")}</button>
+      <div class="reader-title"><strong>${escapeHTML(b.title)}</strong><span>${escapeHTML(b.author||"Unknown author")}</span></div>
+      <div class="reader-space"></div>
+      <button class="icon-btn reader-hide-small" data-action="reader-search" title="Find">${I("search")}</button>
+      <button class="icon-btn" data-action="reader-nav" title="Contents & bookmarks">${I("list")}</button>
+      <button class="icon-btn" data-action="tts" title="Read aloud">${I("speaker")}</button>
+      <button class="icon-btn" data-action="reader-settings" title="Reading settings">${I("tune")}</button>
+      <button class="icon-btn ${hasBookmarkAt(b,Math.round(b.progress||0))?"active":""}" data-action="bookmark" title="Bookmark">${I("bookmark")}</button>
+    </div>
+    <div class="reader-content-wrap">
+      ${isPdf?`<div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"><div class="pdf-error" style="color:#52666a">Loading PDF…</div></div></div>`:
+      `<div class="reader-scroll" id="reader-scroll"><article class="reader-page" id="reader-page" style="--reader-width:${s.width}px;--reader-margin:${s.margin}px;--reader-font:${s.font};--reader-size:${s.size}px;--reader-line:${s.line};--reader-weight:${s.weight};--reader-align:${s.align}">${b.content||"<p>This format is stored in your library, but the browser prototype does not yet extract its text.</p>"}</article></div>`}
+      ${state.sidePanel?readerSideHTML(b):""}
+    </div>
+    <div class="reader-bottom"><span style="font-size:11px">0%</span><input id="reader-range" type="range" min="0" max="100" step=".1" value="${b.progress||0}"><span class="page-indicator">${Math.round(b.progress||0)}%</span></div>
+  </div>`;
+}
+function hasBookmarkAt(b,p){return (b.bookmarks||[]).some(x=>Math.abs(x.progress-p)<=1);}
+function readerSideHTML(b){
+  if(state.sidePanel==="settings"){
+    const s=state.readerSettings;
+    return `<aside class="reader-side"><div class="reader-side-head"><h3>Reading settings</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-side">${I("close")}</button></div>
+      <div class="reader-side-body">
+        <div class="settings-section"><div class="settings-label">Color mode</div><div class="theme-row">${["day","night","sepia","twilight","console"].map(t=>`<button class="theme-dot t-${t} ${s.theme===t?"active":""}" data-theme="${t}" title="${t}"></button>`).join("")}</div></div>
+        <div class="settings-section"><div class="settings-label">Typography</div>
