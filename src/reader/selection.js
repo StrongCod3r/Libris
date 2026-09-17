@@ -28,6 +28,7 @@ export function attachSelectionTools(){
   let selectionTimer=null;
   let lastPointerType="mouse";
   let pointerDown=false;
+  const coarsePointer=matchMedia("(pointer: coarse)").matches;
 
   const schedule=(delay=null)=>{
     clearTimeout(selectionTimer);
@@ -95,6 +96,16 @@ export function attachSelectionTools(){
     lastPointerType=ev.pointerType||lastPointerType;
     schedule(260);
   },{passive:true,signal});
+
+  // Suppress the browser touch callout/context menu inside the reader so
+  // mobile users see Libris' selection toolbar instead of two menus.
+  // Native selection and drag handles remain enabled via user-select:text.
+  host.addEventListener("contextmenu",ev=>{
+    if(coarsePointer||lastPointerType==="touch"||lastPointerType==="pen"){
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+  },{signal});
 
   host.addEventListener("keyup",ev=>{
     if(ev.shiftKey||["Shift","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"].includes(ev.key))schedule(60);
