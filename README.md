@@ -23,7 +23,7 @@ http://localhost:8080
 - Local browser persistence with IndexedDB
 - Import TXT, Markdown, HTML, EPUB and PDF
 - EPUB extraction through `fflate` loaded from jsDelivr
-- PDF rendering with PDF.js and lazy-loaded canvas pages
+- PDF rendering with PDF.js 6.3.289 and lazy-loaded canvas pages
 - Selectable PDF text layer with Quote / Note / Copy actions
 - Persistent highlights in reflowable ebooks and PDFs
 - Configurable default highlight color
@@ -60,9 +60,11 @@ Formats such as MOBI/AZW3/FB2/DOCX/CBR/CBZ can be catalogued, but this small bro
 
 - Text selection supports mouse, keyboard, touch, stylus/S-Pen/Apple Pencil via Pointer Events plus selectionchange handling
 
-- PDF text selection now uses the official PDF.js `TextLayerBuilder` from `pdf_viewer.min.js`
-- Custom PDF Range/sticky-selection manipulation was removed; PDF.js owns drag selection
-- Official `.endOfContent` selection stabilizer and viewer text-layer CSS are used
+- PDF text selection uses the official PDF.js 6.3.289 `TextLayerBuilder`
+- The builder receives the real `pdfPage` and uses PDF.js' global selection listener
+- PDF.js owns pointer/selection behavior, including dynamic `.endOfContent` repositioning across whitespace
+- The official 6.3.289 `pdf_viewer.css` supplies the text-layer selection styles
+- Custom PDF Range/sticky-selection manipulation remains removed; Libris only observes the final selection for its actions
 
 ## Repository layout
 
