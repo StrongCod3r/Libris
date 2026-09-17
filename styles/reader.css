@@ -181,6 +181,12 @@
   min-height:38px;
 }
 @media (pointer:coarse){
+  /* Keep native selection/handles, but suppress the OS/browser callout menu. */
+  .reader-page,
+  .pdf-text-layer{
+    -webkit-touch-callout:none;
+  }
+
   .selection-tools button{
     min-height:44px;
     padding:9px 11px;
