@@ -1,0 +1,85 @@
+  // Prefer the browser's on-device Translator API when available.
+  if(window.Translator?.create){
+    const translator=await window.Translator.create({sourceLanguage:"en",targetLanguage:target});
+    return await translator.translate(text);
+  }
+
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const url=`https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(target)}&dt=t&q=${encodeURIComponent(text.slice(0,3000))}`;
+    const res=await fetch(url,{signal:controller.signal});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    const translated=(data?.[0]||[]).map(x=>x?.[0]||"").join("").trim();
+    if(!translated)throw new Error("No translation returned");
+    return translated;
+  }finally{
+    clearTimeout(timer);
+  }
+}
+function toast(msg){
+  let stack=$("#toast-stack");
+  if(!stack){stack=document.createElement("div");stack.className="toast-stack";stack.id="toast-stack";document.body.appendChild(stack);}
+  const el=document.createElement("div");el.className="toast";el.textContent=msg;stack.appendChild(el);
+  setTimeout(()=>el.remove(),2400);
+}
+
+async function importFiles(files){
+  if(!files.length)return;
+  state.importing=true;
+  for(const file of files){
+    try{
+      const ext=file.name.split(".").pop().toLowerCase();
+      let title=file.name.replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim();
+      let author="Unknown author",content="",coverData="",toc=[],blob=null;
+      if(ext==="txt"||ext==="md"){content=textToHTML(await file.text());}
+      else if(ext==="html"||ext==="htm"){content=stripUnsafeHTML(await file.text());}
+      else if(ext==="epub"){
+        const parsed=await parseEPUB(file);title=parsed.title;author=parsed.author;content=stripUnsafeHTML(parsed.html);coverData=parsed.coverData;toc=parsed.toc;
+      } else if(ext==="pdf"){blob=file;}
+      else {blob=file;}
+      const book={
+        id:`local-${crypto.randomUUID()}`,title,author,format:ext.toUpperCase(),size:formatBytes(file.size),
+        progress:0,favorite:false,status:"to-read",series:"",collections:["Imported"],addedAt:Date.now(),updatedAt:Date.now(),
+        imported:true,description:`Imported from ${file.name}. Stored locally in this browser.`,palette:hashColors(title),
+        content,coverData,toc,blob,trashed:false,bookmarks:[],quotes:[]
+      };
+      state.books.push(book);await putBook(book);toast(`Imported: ${title}`);
+    }catch(err){console.error(err);toast(`Could not import ${file.name}: ${err.message}`);}
+  }
+  state.importing=false;state.modal=null;state.view="all";render();
+}
+function formatBytes(n){
+  if(n<1024)return `${n} B`;if(n<1048576)return `${(n/1024).toFixed(0)} KB`;return `${(n/1048576).toFixed(1)} MB`;
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key==="/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||"")){e.preventDefault();$("#library-search")?.focus();}
+  if(e.key==="Escape"){
+    if(state.reader){ if(state.sidePanel){setReaderSidePanel(null);}else closeReader(); }
+    else if(state.modal||state.menu||state.mobileNav){state.modal=null;state.menu=null;state.mobileNav=false;render();}
+  }
+  if(state.reader && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||"")){
+    if(e.key==="ArrowDown"||e.key==="PageDown"){$("#reader-scroll")?.scrollBy({top:innerHeight*.72,behavior:"smooth"});}
+    if(e.key==="ArrowUp"||e.key==="PageUp"){$("#reader-scroll")?.scrollBy({top:-innerHeight*.72,behavior:"smooth"});}
+  }
+});
+
+async function init(){
+  state.display=await getKV("display","list");
+  state.sort=await getKV("sort","recent");
+  state.readerSettings={...defaultReaderSettings,highlightColor:"#f4d35e",translationTarget:"es",...(await getKV("readerSettings",{}))};
+  const storedMenu=await getKV("selectionMenu",null);
+  if(Array.isArray(storedMenu)){
+    const byId=new Map(storedMenu.map(x=>[x.id,x]));
+    state.selectionMenu=[
+      ...storedMenu.filter(x=>SELECTION_ACTIONS[x.id]).map(x=>({id:x.id,visible:x.visible!==false})),
+      ...DEFAULT_SELECTION_MENU.filter(x=>!byId.has(x.id)).map(x=>({...x}))
+    ];
+  }
+  state.books=await getBooks();
+  if(!state.books.length){await putBooks(demoBooks);state.books=await getBooks();}
+  render();
+}
+init().catch(err=>{console.error(err);document.getElementById("app").innerHTML=`<div style="padding:30px;font-family:system-ui"><h2>Could not start the local library</h2><pre>${escapeHTML(err.stack||err.message)}</pre></div>`;});
