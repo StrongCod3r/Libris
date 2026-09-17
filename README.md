@@ -66,4 +66,45 @@ Formats such as MOBI/AZW3/FB2/DOCX/CBR/CBZ can be catalogued, but this small bro
 
 ## Repository layout
 
-Because the GitHub connector has per-file payload limits, the large application source is stored in `src/app.part01.txt` … `src/app.part06.txt`. `app.js` loads and joins those fragments at runtime before importing them as a module. The stylesheet is split between `styles/base.css` and `styles/reader.css`, loaded by `styles.css`.
+```text
+Libris/
+├── app.js
+├── index.html
+├── styles.css
+├── styles/
+│   ├── base.css
+│   └── reader.css
+└── src/
+    ├── main.js
+    ├── state.js
+    ├── library/
+    │   ├── filters.js
+    │   ├── import.js
+    │   └── library.js
+    ├── reader/
+    │   ├── epub-reader.js
+    │   ├── highlights.js
+    │   ├── pdf-reader.js
+    │   ├── reader.js
+    │   ├── selection.js
+    │   └── translation.js
+    ├── storage/
+    │   └── db.js
+    └── ui/
+        ├── dialogs.js
+        ├── icons.js
+        ├── selection-menu.js
+        ├── sidebar.js
+        └── toolbar.js
+```
+
+The application now uses native ES modules. `app.js` is only the browser entry point and imports `src/main.js`; the old concatenated `app.partXX.txt` loader has been removed.
+
+### Architecture
+
+- **state**: shared application state and defaults
+- **storage**: IndexedDB persistence
+- **library**: filtering, importing and library mutations
+- **reader**: reflowable reader, PDF.js integration, EPUB parsing, selection, highlights and translation
+- **ui**: reusable HTML renderers and controls
+- **main**: application orchestration, event binding and lifecycle
