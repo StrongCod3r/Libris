@@ -61,7 +61,7 @@ export function readerHTML(){
     </div>
     <div class="reader-content-wrap">
       ${isPdf
-        ? `<div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages" id="pdf-pages"><div class="pdf-error" style="color:#52666a">Loading PDF…</div></div></div>`
+        ? `<div class="pdf-scroll" id="pdf-scroll"><div class="pdf-pages pdfViewer" id="pdf-pages"><div class="pdf-error" style="color:#52666a">Loading PDF…</div></div></div>`
         : `<div class="reader-scroll" id="reader-scroll"><article class="reader-page" id="reader-page" style="--reader-width:${s.width}px;--reader-margin:${s.margin}px;--reader-font:${s.font};--reader-size:${s.size}px;--reader-line:${s.line};--reader-weight:${s.weight};--reader-align:${s.align}">${book.content||"<p>This format is stored in your library, but Libris does not yet extract its text.</p>"}</article></div>`}
       ${state.sidePanel?readerSideHTML(book):""}
     </div>
