@@ -6,7 +6,7 @@ import {sidebarHTML,contentHTML} from "./ui/sidebar.js";
 import {topbarHTML} from "./ui/toolbar.js";
 import {modalHTML,contextMenuHTML} from "./ui/dialogs.js";
 import {readerHTML,readerSideHTML,applyReaderThemeLive,applyReaderSettingsLive,createSpeechController} from "./reader/reader.js";
-import {renderPDF} from "./reader/pdf-reader.js";
+import {cleanupPDF,renderPDF} from "./reader/pdf-reader.js";
 import {applyReflowHighlights} from "./reader/highlights.js";
 import {removeTranslationPopover} from "./reader/translation.js";
 import {configureSelection,attachSelectionTools,removeSelectionTools,setSelectionMenuVisibility,moveSelectionMenuItem} from "./reader/selection.js";
@@ -38,6 +38,7 @@ function shellHTML(){
 }
 
 export function render(preserveReaderScroll=false){
+  cleanupPDF();
   let progress=0;
   const oldScroll=$("#reader-scroll")||$("#pdf-scroll");
   if(preserveReaderScroll&&oldScroll){
@@ -266,6 +267,7 @@ function handleAction(action){
 }
 
 function closeReader(){
+  cleanupPDF();
   speech.stop();
   ttsActive=false;
   state.reader=null;
