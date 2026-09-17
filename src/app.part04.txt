@@ -1,0 +1,354 @@
+  root.querySelectorAll("[data-selection-move]").forEach(el=>{
+    el.onclick=()=>{
+      const [id,dir]=el.dataset.selectionMove.split(":");
+      moveSelectionMenuItem(id,+dir);
+    };
+  });
+}
+
+function applyReaderThemeLive(){
+  const reader=document.querySelector(".reader");
+  if(!reader)return;
+  reader.classList.remove("reader-day","reader-night","reader-sepia","reader-twilight","reader-console");
+  reader.classList.add(`reader-${state.readerSettings.theme}`);
+}
+
+function handleAction(action,e){
+  if(action==="open-nav"){state.mobileNav=true;render();}
+  if(action==="close-nav"){state.mobileNav=false;render();}
+  if(action==="focus-search"){$("#library-search")?.focus();}
+  if(action==="toggle-display"){state.display=state.display==="list"?"grid":"list";setKV("display",state.display);render();}
+  if(action==="cycle-sort"){const opts=["recent","title","author","progress"];state.sort=opts[(opts.indexOf(state.sort)+1)%opts.length];setKV("sort",state.sort);toast(`Sorted by ${state.sort}`);render();}
+  if(action==="import"){state.modal={type:"import"};render();}
+  if(action==="close-modal"){state.modal=null;render();}
+  if(action==="app-settings"){state.modal={type:"settings"};render();}
+  if(action==="load-more"){state.visibleCount+=60;render();}
+  if(action==="close-reader"){closeReader();}
+  if(action==="reader-settings"){
+    if(state.sidePanel==="menu-customize") setReaderSidePanel("settings");
+    else setReaderSidePanel(state.sidePanel==="settings"?null:"settings");
+  }
+  if(action==="customize-selection-menu"){
+    removeSelectionTools();
+    removeTranslationPopover();
+    setReaderSidePanel("menu-customize");
+  }
+  if(action==="reader-nav"){setReaderSidePanel(state.sidePanel==="nav"?null:"nav");}
+  if(action==="close-side"){setReaderSidePanel(null);}
+  if(action==="bookmark"){toggleBookmark();}
+  if(action==="tts"){toggleTTS();}
+  if(action==="reader-search"){readerSearch();}
+}
+
+async function toggleFavorite(id){
+  const b=state.books.find(x=>x.id===id); if(!b)return;
+  b.favorite=!b.favorite;b.updatedAt=Date.now();await putBook(b);render();
+}
+async function setStatus(id,status){
+  const b=state.books.find(x=>x.id===id);if(!b)return;
+  b.status=b.status===status?(b.progress>0?"reading":"to-read"):status;
+  if(status==="read")b.progress=100;
+  b.updatedAt=Date.now();await putBook(b);render();
+}
+async function toggleTrash(id){
+  const b=state.books.find(x=>x.id===id);if(!b)return;
+  b.trashed=!b.trashed;b.updatedAt=Date.now();await putBook(b);state.menu=null;render();
+}
+
+function openBook(id){
+  const b=state.books.find(x=>x.id===id); if(!b)return;
+  state.modal=null;state.menu=null;state.reader={id};state.sidePanel=null;
+  b.status=b.status==="to-read"?"reading":b.status;b.updatedAt=Date.now();
+  putBook(b);
+  render();
+}
+function closeReader(){
+  speech.stop();
+  state.reader=null;
+  state.sidePanel=null;
+  removeSelectionTools();
+  render();
+}
+function attachReaderScroll(scroll,b){
+  scroll.addEventListener("scroll",()=>{
+    const max=Math.max(1,scroll.scrollHeight-scroll.clientHeight);
+    const p=Math.max(0,Math.min(100,scroll.scrollTop/max*100));
+    b.progress=p;
+    const range=$("#reader-range"); if(range)range.value=p;
+    const ind=$(".page-indicator"); if(ind)ind.textContent=`${Math.round(p)}%`;
+    clearTimeout(saveProgressTimer);
+    saveProgressTimer=setTimeout(()=>{b.updatedAt=Date.now();putBook(b)},400);
+  },{passive:true});
+}
+function jumpProgress(p){
+  const b=state.books.find(x=>x.id===state.reader?.id); if(!b)return;
+  b.progress=Math.max(0,Math.min(100,p));
+  const scroll=$("#reader-scroll") || $("#pdf-scroll");
+  if(scroll)scroll.scrollTop=(b.progress/100)*Math.max(0,scroll.scrollHeight-scroll.clientHeight);
+  putBook(b);
+}
+function jumpAnchor(id){
+  setReaderSidePanel(null);
+  setTimeout(()=>{
+    if(id){
+      const el=document.getElementById(id);
+      el?.scrollIntoView({behavior:"smooth",block:"start"});
+    }
+  },20);
+}
+async function toggleBookmark(){
+  const b=state.books.find(x=>x.id===state.reader?.id);if(!b)return;
+  const p=Math.round(b.progress||0); b.bookmarks=b.bookmarks||[];
+  const idx=b.bookmarks.findIndex(x=>Math.abs(x.progress-p)<=1);
+  if(idx>=0){b.bookmarks.splice(idx,1);toast("Bookmark removed");}
+  else{b.bookmarks.push({progress:p,label:`Position ${p}%`,createdAt:Date.now()});toast("Bookmark added");}
+  await putBook(b);render(true);
+}
+let ttsActive=false;
+function toggleTTS(){
+  if(ttsActive){speech.stop();ttsActive=false;toast("Read aloud stopped");return;}
+  const page=$("#reader-page"); if(!page){toast("Read aloud is currently available for reflowable text.");return;}
+  speech.speak(page.innerText.slice(0,25000));ttsActive=true;toast("Reading aloud");
+}
+function readerSearch(){
+  const term=prompt("Find in this book:");
+  if(!term)return;
+  const page=$("#reader-page"); if(!page)return;
+  const walker=document.createTreeWalker(page,NodeFilter.SHOW_TEXT);
+  let node; const needle=term.toLowerCase();
+  while(node=walker.nextNode()){
+    const idx=node.nodeValue.toLowerCase().indexOf(needle);
+    if(idx>=0){
+      const range=document.createRange();range.setStart(node,idx);range.setEnd(node,idx+term.length);
+      const sel=getSelection();sel.removeAllRanges();sel.addRange(range);
+      range.startContainer.parentElement?.scrollIntoView({behavior:"smooth",block:"center"});
+      return;
+    }
+  }
+  toast("No match found");
+}
+function applyReaderSettingsLive(){
+  const p=$("#reader-page");if(!p)return;
+  const s=state.readerSettings;
+  p.style.setProperty("--reader-width",`${s.width}px`);
+  p.style.setProperty("--reader-margin",`${s.margin}px`);
+  p.style.setProperty("--reader-font",s.font);
+  p.style.setProperty("--reader-size",`${s.size}px`);
+  p.style.setProperty("--reader-line",s.line);
+  p.style.setProperty("--reader-weight",s.weight);
+  p.style.setProperty("--reader-align",s.align);
+}
+function saveReaderSettings(){setKV("readerSettings",state.readerSettings);}
+async function saveSelectionMenu(){await setKV("selectionMenu",state.selectionMenu);}
+async function setSelectionMenuVisibility(id,visible){
+  const item=state.selectionMenu.find(x=>x.id===id); if(!item)return;
+  item.visible=visible;
+  await saveSelectionMenu();
+  refreshSelectionMenuCustomizer();
+  refreshFloatingSelectionMenu();
+}
+async function moveSelectionMenuItem(id,direction){
+  const index=state.selectionMenu.findIndex(x=>x.id===id); if(index<0)return;
+  const next=Math.max(0,Math.min(state.selectionMenu.length-1,index+direction));
+  if(next===index)return;
+  const [item]=state.selectionMenu.splice(index,1);
+  state.selectionMenu.splice(next,0,item);
+  await saveSelectionMenu();
+  refreshSelectionMenuCustomizer();
+  refreshFloatingSelectionMenu();
+}
+
+function refreshSelectionMenuCustomizer(){
+  if(state.sidePanel!=="menu-customize") return;
+  const container=document.querySelector(".menu-customizer");
+  if(!container) return;
+
+  container.innerHTML=state.selectionMenu
+    .map((item,index)=>selectionMenuRowHTML(item,index))
+    .join("");
+
+  container.querySelectorAll("[data-selection-visible]").forEach(el=>{
+    el.onchange=()=>setSelectionMenuVisibility(el.dataset.selectionVisible,el.checked);
+  });
+
+  container.querySelectorAll("[data-selection-move]").forEach(el=>{
+    el.onclick=()=>{
+      const [id,dir]=el.dataset.selectionMove.split(":");
+      moveSelectionMenuItem(id,+dir);
+    };
+  });
+}
+
+function refreshFloatingSelectionMenu(){
+  const floating=document.getElementById("selection-tools");
+  if(!floating || !currentSelectionContext) return;
+  renderSelectionMenu(floating,currentSelectionContext);
+}
+
+
+async function renderPDF(book){
+  const host=$("#pdf-pages");
+  if(!host || !book?.blob) return;
+
+  if(!window.pdfjsLib){
+    host.innerHTML='<div class="pdf-error"><strong>PDF.js could not be loaded.</strong><br>Check the connection to the PDF.js CDN, or bundle PDF.js locally for a fully offline build.</div>';
+    return;
+  }
+
+  try{
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+    const data = new Uint8Array(await book.blob.arrayBuffer());
+    const pdf = await window.pdfjsLib.getDocument({data}).promise;
+    const first = await pdf.getPage(1);
+    const baseViewport = first.getViewport({scale:1});
+    const ratio = baseViewport.height / Math.max(1, baseViewport.width);
+
+    host.innerHTML = "";
+    host.dataset.pdfPages = String(pdf.numPages);
+    const pageNodes = [];
+
+    for(let pageNumber=1; pageNumber<=pdf.numPages; pageNumber++){
+      const pageEl=document.createElement("div");
+      pageEl.className="pdf-page";
+      pageEl.dataset.page=pageNumber;
+      pageEl.style.aspectRatio=`1 / ${ratio}`;
+      pageEl.innerHTML=`<div class="pdf-page-loading">Page ${pageNumber}</div>`;
+      host.appendChild(pageEl);
+      pageNodes.push(pageEl);
+    }
+
+    const rendered=new Set();
+
+    const renderPage=async pageEl=>{
+      const pageNumber=+pageEl.dataset.page;
+      if(rendered.has(pageNumber)) return;
+      rendered.add(pageNumber);
+
+      try{
+        const page = pageNumber===1 ? first : await pdf.getPage(pageNumber);
+        const available = Math.max(280, Math.min(980, host.clientWidth || 780));
+        const base = page.getViewport({scale:1});
+        const cssScale = available / base.width;
+        const cssViewport = page.getViewport({scale:cssScale});
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const renderViewport = page.getViewport({scale:cssScale*dpr});
+
+        const canvas=document.createElement("canvas");
+        canvas.width=Math.floor(renderViewport.width);
+        canvas.height=Math.floor(renderViewport.height);
+        canvas.setAttribute("aria-hidden","true");
+
+        const highlightLayer=document.createElement("div");
+        highlightLayer.className="pdf-highlight-layer";
+        highlightLayer.dataset.page=pageNumber;
+
+        const hasOfficialBuilder=!!window.pdfjsViewer?.TextLayerBuilder;
+        const textLayerBuilder=hasOfficialBuilder
+          ? new window.pdfjsViewer.TextLayerBuilder({})
+          : null;
+        const textLayer=textLayerBuilder?.div || document.createElement("div");
+
+        textLayer.classList.add("textLayer","pdf-text-layer");
+        textLayer.dataset.page=pageNumber;
+        textLayer.style.width=`${cssViewport.width}px`;
+        textLayer.style.height=`${cssViewport.height}px`;
+        textLayer.style.setProperty("--scale-factor",String(cssViewport.scale));
+        textLayer.setAttribute("aria-label",`Selectable text for PDF page ${pageNumber}`);
+
+        pageEl.style.aspectRatio="auto";
+        pageEl.style.width=`${cssViewport.width}px`;
+        pageEl.style.height=`${cssViewport.height}px`;
+        pageEl.style.setProperty("--scale-factor",String(cssViewport.scale));
+        pageEl.replaceChildren(canvas,highlightLayer,textLayer);
+
+        const ctx=canvas.getContext("2d",{alpha:false});
+        await page.render({canvasContext:ctx,viewport:renderViewport}).promise;
+        await renderPDFTextLayer(page,textLayerBuilder,textLayer,cssViewport);
+        applyPDFHighlightsToPage(book,pageEl,pageNumber);
+      }catch(err){
+        console.error("PDF page render error",err);
+        pageEl.innerHTML=`<div class="pdf-error">Could not render page ${pageNumber}.</div>`;
+      }
+    };
+
+    if("IntersectionObserver" in window){
+      const observer=new IntersectionObserver(entries=>{
+        for(const entry of entries){
+          if(entry.isIntersecting){
+            renderPage(entry.target);
+            observer.unobserve(entry.target);
+          }
+        }
+      },{root:$("#pdf-scroll"),rootMargin:"900px 0px"});
+      pageNodes.forEach(node=>observer.observe(node));
+    }else{
+      for(const node of pageNodes.slice(0,8)) await renderPage(node);
+    }
+
+    // Render the initial pages immediately; the rest stay lazy.
+    for(const node of pageNodes.slice(0,3)) renderPage(node);
+  }catch(err){
+    console.error("PDF load error",err);
+    host.innerHTML=`<div class="pdf-error"><strong>Could not open this PDF.</strong><br>${escapeHTML(err.message||String(err))}</div>`;
+  }
+}
+
+async function renderPDFTextLayer(page,builder,container,viewport){
+  // This is the same viewer-layer path used by Mozilla's generic PDF.js viewer.
+  // TextLayerBuilder adds the endOfContent selection stabilizer and its mouse
+  // handling, which is critical when dragging through whitespace between lines.
+  if(builder?.setTextContentSource && typeof builder.render==="function"){
+    const stream=page.streamTextContent({
+      includeMarkedContent:true,
+      disableNormalization:true
+    });
+    builder.setTextContentSource(stream);
+    await builder.render(viewport);
+    return;
+  }
+
+  // CDN/viewer fallback: use the core renderer, then reproduce the official
+  // endOfContent behaviour rather than altering Selection/Range ourselves.
+  container.replaceChildren();
+  const task=window.pdfjsLib.renderTextLayer({
+    textContentSource:page.streamTextContent({
+      includeMarkedContent:true,
+      disableNormalization:true
+    }),
+    container,
+    viewport,
+    textDivs:[]
+  });
+  await task.promise;
+
+  const end=document.createElement("div");
+  end.className="endOfContent";
+  container.append(end);
+
+  container.addEventListener("mousedown",evt=>{
+    const marker=container.querySelector(".endOfContent");
+    if(!marker)return;
+
+    let adjustTop=evt.target!==container;
+    if(adjustTop){
+      const bounds=container.getBoundingClientRect();
+      const ratio=Math.max(0,(evt.pageY-bounds.top)/Math.max(1,bounds.height));
+      marker.style.top=`${(ratio*100).toFixed(2)}%`;
+    }
+    marker.classList.add("active");
+  });
+
+  container.addEventListener("mouseup",()=>{
+    const marker=container.querySelector(".endOfContent");
+    if(!marker)return;
+    marker.style.top="";
+    marker.classList.remove("active");
+  });
+}
+let currentSelectionContext=null;
+let selectionMoreOpen=false;
+
+function attachSelectionTools(){
+  const host=$("#reader-page") || $("#pdf-pages");
