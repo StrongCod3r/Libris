@@ -50,9 +50,13 @@ export function attachSelectionTools(){
       const div=document.createElement("div");
       div.className="selection-tools";
       div.id="selection-tools";
-      positionSelectionMenu(div,rect,lastPointerType);
       renderSelectionMenu(div,currentSelectionContext,selectionMoreOpen);
       document.body.appendChild(div);
+
+      // Position only after the menu is in the DOM, so its real dimensions
+      // are available. This keeps it anchored above the complete selection
+      // instead of overlapping one of the selected lines.
+      positionSelectionMenu(div,rect,lastPointerType);
 
       div.addEventListener("pointerdown",ev=>{ev.preventDefault();ev.stopPropagation();},{signal});
       div.addEventListener("click",ev=>{
@@ -106,22 +110,64 @@ export function attachSelectionTools(){
 }
 
 function getSelectionVisualRect(range){
-  const rects=[...range.getClientRects()].filter(r=>r.width>0||r.height>0);
+  const rects=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0);
   if(!rects.length)return range.getBoundingClientRect();
-  const r=rects[rects.length-1];
-  return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};
+
+  // Anchor to the complete visual selection, not to the last selected line.
+  // Multi-line PDF selections often consist of many individual span rects.
+  const left=Math.min(...rects.map(r=>r.left));
+  const right=Math.max(...rects.map(r=>r.right));
+  const top=Math.min(...rects.map(r=>r.top));
+  const bottom=Math.max(...rects.map(r=>r.bottom));
+
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width:right-left,
+    height:bottom-top
+  };
 }
 
 function positionSelectionMenu(menu,rect,pointerType){
+  const gap=10;
   const margin=8;
-  const menuWidth=Math.min(360,Math.max(220,innerWidth-margin*2));
-  const safeLeft=Math.max(margin,Math.min(innerWidth-menuWidth-margin,rect.left));
-  let top=rect.top-52;
-  if(pointerType==="touch"||pointerType==="pen"){
-    if(top<64)top=rect.bottom+12;
-  }else top=Math.max(64,top);
-  menu.style.left=`${safeLeft}px`;
-  menu.style.top=`${Math.max(margin,top)}px`;
+  const viewport=window.visualViewport;
+  const viewportLeft=viewport?.offsetLeft||0;
+  const viewportTop=viewport?.offsetTop||0;
+  const viewportWidth=viewport?.width||innerWidth;
+  const viewportHeight=viewport?.height||innerHeight;
+  const viewportRight=viewportLeft+viewportWidth;
+  const viewportBottom=viewportTop+viewportHeight;
+
+  const menuRect=menu.getBoundingClientRect();
+  const menuWidth=menuRect.width;
+  const menuHeight=menuRect.height;
+
+  // Center the toolbar above the entire selection.
+  const selectionCenter=rect.left+(rect.width/2);
+  let left=selectionCenter-(menuWidth/2);
+  left=Math.max(
+    viewportLeft+margin,
+    Math.min(viewportRight-menuWidth-margin,left)
+  );
+
+  let top=rect.top-menuHeight-gap;
+
+  // Above is the preferred position. Only move below when there is genuinely
+  // not enough viewport space, rather than forcing the toolbar into the text.
+  if(top<viewportTop+margin){
+    top=rect.bottom+gap;
+  }
+
+  // Keep the fallback position visible on very small/mobile viewports.
+  if(top+menuHeight>viewportBottom-margin){
+    top=Math.max(viewportTop+margin,viewportBottom-menuHeight-margin);
+  }
+
+  menu.style.left=`${Math.round(left)}px`;
+  menu.style.top=`${Math.round(top)}px`;
   menu.dataset.pointerType=pointerType||"mouse";
 }
 
