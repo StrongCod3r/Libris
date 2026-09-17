@@ -1,0 +1,241 @@
+          <div class="setting-row"><label>Font</label><select data-reader-setting="font"><option value="Georgia, serif" ${s.font.startsWith("Georgia")?"selected":""}>Georgia</option><option value="system-ui, sans-serif" ${s.font.startsWith("system")?"selected":""}>System</option><option value="'Trebuchet MS', sans-serif" ${s.font.startsWith("'Trebuchet")?"selected":""}>Trebuchet</option><option value="'Courier New', monospace" ${s.font.startsWith("'Courier")?"selected":""}>Courier</option></select></div>
+          ${sliderSetting("size","Font size",s.size,13,36,1)}
+          ${sliderSetting("weight","Thickness",s.weight,300,800,100)}
+          ${sliderSetting("line","Line spacing",s.line,1.2,2.2,.05)}
+        </div>
+        <div class="settings-section"><div class="settings-label">Page</div>
+          ${sliderSetting("width","Text width",s.width,480,1100,20)}
+          ${sliderSetting("margin","Top margin",s.margin,18,100,2)}
+          <div class="setting-row"><label>Alignment</label><select data-reader-setting="align"><option value="left" ${s.align==="left"?"selected":""}>Left</option><option value="justify" ${s.align==="justify"?"selected":""}>Justify</option><option value="center" ${s.align==="center"?"selected":""}>Center</option></select></div>
+        </div>
+        <div class="settings-section"><div class="settings-label">Selection tools</div>
+          <div class="setting-row"><label>Highlight color</label><input class="highlight-color-input" type="color" value="${escapeHTML(s.highlightColor||"#f4d35e")}" data-reader-setting="highlightColor"><span class="color-value">${escapeHTML(s.highlightColor||"#f4d35e")}</span></div>
+          <div class="setting-row"><label>Translate to</label><select data-reader-setting="translationTarget">
+            <option value="es" ${s.translationTarget==="es"?"selected":""}>Spanish</option>
+            <option value="en" ${s.translationTarget==="en"?"selected":""}>English</option>
+            <option value="fr" ${s.translationTarget==="fr"?"selected":""}>French</option>
+            <option value="de" ${s.translationTarget==="de"?"selected":""}>German</option>
+            <option value="it" ${s.translationTarget==="it"?"selected":""}>Italian</option>
+            <option value="pt" ${s.translationTarget==="pt"?"selected":""}>Portuguese</option>
+          </select></div>
+          <button class="secondary-btn" data-action="customize-selection-menu">${I("more")} Customize selection menu</button>
+        </div>
+      </div></aside>`;
+  }
+  if(state.sidePanel==="menu-customize"){
+    return `<aside class="reader-side"><div class="reader-side-head"><button class="icon-btn" data-action="reader-settings" title="Back">${I("back")}</button><h3>Customize selection menu</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-side">${I("close")}</button></div>
+      <div class="reader-side-body">
+        <p class="customize-help">Choose which actions are visible in the floating selection bar and change their order. Hidden actions remain available under the <strong>⋯</strong> menu.</p>
+        <div class="menu-customizer">
+          ${state.selectionMenu.map((item,index)=>selectionMenuRowHTML(item,index)).join("")}
+        </div>
+        <div class="customize-more-note"><strong>⋯ More</strong> is always visible so hidden actions and menu customization remain accessible.</div>
+      </div></aside>`;
+  }
+  return `<aside class="reader-side"><div class="reader-side-head"><h3>Navigation</h3><div class="top-spacer"></div><button class="icon-btn" data-action="close-side">${I("close")}</button></div>
+    <div class="reader-side-body">
+      <div class="side-tabs"><button data-side-tab="toc" class="${state.sideTab==="toc"?"active":""}">Contents</button><button data-side-tab="bookmarks" class="${state.sideTab==="bookmarks"?"active":""}">Bookmarks</button><button data-side-tab="quotes" class="${state.sideTab==="quotes"?"active":""}">Quotes</button></div>
+      ${sideTabHTML(b)}
+    </div></aside>`;
+}
+function sliderSetting(key,label,val,min,max,step){
+  return `<div class="setting-row"><label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${val}" data-reader-setting="${key}"><span style="font-size:11px;min-width:34px;text-align:right">${val}</span></div>`;
+}
+function selectionMenuRowHTML(item,index){
+  const def=SELECTION_ACTIONS[item.id]||{label:item.id};
+  return `<div class="menu-customizer-row">
+    <label class="menu-visibility"><input type="checkbox" data-selection-visible="${item.id}" ${item.visible?"checked":""}><span>${escapeHTML(def.label)}</span></label>
+    <div class="menu-order-actions">
+      <button class="mini-order-btn" data-selection-move="${item.id}:-1" ${index===0?"disabled":""} title="Move up">↑</button>
+      <button class="mini-order-btn" data-selection-move="${item.id}:1" ${index===state.selectionMenu.length-1?"disabled":""} title="Move down">↓</button>
+    </div>
+  </div>`;
+}
+function sideTabHTML(b){
+  if(state.sideTab==="bookmarks"){
+    const arr=b.bookmarks||[];
+    return arr.length?arr.map((x,i)=>`<button class="bookmark-item" style="width:100%;text-align:left" data-jump="${x.progress}"><strong>${Math.round(x.progress)}%</strong><span>${escapeHTML(x.label||"Bookmark")}</span></button>`).join(""):'<div class="empty">No bookmarks yet.</div>';
+  }
+  if(state.sideTab==="quotes"){
+    const arr=b.quotes||[];
+    return arr.length?arr.map((x,i)=>`<div class="quote-item"><strong>“${escapeHTML(x.text)}”</strong><span>${Math.round(x.progress)}%${x.note?` · ${escapeHTML(x.note)}`:""}</span></div>`).join(""):'<div class="empty">Select text in the reader to save a quote.</div>';
+  }
+  const toc=(b.toc&&b.toc.length?b.toc:inferTOC(b.content));
+  return toc.length?toc.map((x,i)=>`<button class="toc-item" style="width:100%;text-align:left" data-anchor="${escapeHTML(x.anchor||"")}"><strong>${escapeHTML(x.title)}</strong><span>Section ${i+1}</span></button>`).join(""):'<div class="empty">No table of contents found.</div>';
+}
+function inferTOC(html=""){
+  const doc=new DOMParser().parseFromString(html,"text/html");
+  return [...doc.querySelectorAll("h1,h2")].map((h,i)=>({title:h.textContent.trim(),anchor:h.id||""}));
+}
+
+function render(preserveReaderScroll=false){
+  let progress=0;
+  const oldScroll=$("#reader-scroll") || $("#pdf-scroll");
+  if(preserveReaderScroll && oldScroll) progress=oldScroll.scrollTop/Math.max(1,oldScroll.scrollHeight-oldScroll.clientHeight);
+  document.getElementById("app").innerHTML=shellHTML();
+  bindStatic();
+  if(state.reader){
+    setTimeout(async ()=>{
+      const b=state.books.find(x=>x.id===state.reader.id);
+      if(!b) return;
+
+      const scroll=$("#reader-scroll");
+      if(scroll){
+        applyReflowHighlights(b);
+        const target=preserveReaderScroll?progress:(b.progress||0)/100;
+        scroll.scrollTop=target*Math.max(0,scroll.scrollHeight-scroll.clientHeight);
+        attachReaderScroll(scroll,b);
+        return;
+      }
+
+      const pdfScroll=$("#pdf-scroll");
+      if(pdfScroll && b.blob){
+        await renderPDF(b);
+        const target=preserveReaderScroll?progress:(b.progress||0)/100;
+        pdfScroll.scrollTop=target*Math.max(0,pdfScroll.scrollHeight-pdfScroll.clientHeight);
+        attachReaderScroll(pdfScroll,b);
+      }
+    },0);
+  }
+}
+
+function bindStatic(){
+  $$("#app [data-nav]").forEach(el=>el.onclick=()=>{state.view=el.dataset.nav;state.mobileNav=false;state.query="";state.visibleCount=60;render();});
+  $$("[data-action]").forEach(el=>el.onclick=(e)=>handleAction(el.dataset.action,e));
+  $$("[data-open]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();openBook(el.dataset.open);});
+  $$("[data-detail]").forEach(el=>el.onclick=()=>{state.menu=null;state.modal={type:"details",id:el.dataset.detail};render();});
+  $$("[data-fav]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleFavorite(el.dataset.fav);});
+  $$("[data-status]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();const [id,status]=el.dataset.status.split(":");setStatus(id,status);});
+  $$("[data-menu]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();state.menu={id:el.dataset.menu,x:Math.min(e.clientX,innerWidth-205),y:Math.min(e.clientY,innerHeight-225)};render();});
+  $$("[data-trash]").forEach(el=>el.onclick=()=>toggleTrash(el.dataset.trash));
+  $$("[data-group]").forEach(el=>el.onclick=()=>{state.query=el.dataset.group;state.view="all";render();});
+  $$("[data-theme]").forEach(el=>el.onclick=()=>{state.readerSettings.theme=el.dataset.theme;saveReaderSettings();applyReaderThemeLive();refreshReaderSidePanel();});
+  $$("[data-side-tab]").forEach(el=>el.onclick=()=>{state.sideTab=el.dataset.sideTab;refreshReaderSidePanel();});
+  $$("[data-jump]").forEach(el=>el.onclick=()=>jumpProgress(+el.dataset.jump));
+  $$("[data-anchor]").forEach(el=>el.onclick=()=>jumpAnchor(el.dataset.anchor));
+  $$("[data-reader-setting]").forEach(el=>el.oninput=()=>{
+    const k=el.dataset.readerSetting;
+    let v=el.value;
+    if(["size","weight","width","margin","line"].includes(k))v=+v;
+    state.readerSettings[k]=v;
+    saveReaderSettings();
+    applyReaderSettingsLive();
+    if(el.nextElementSibling?.tagName==="SPAN")el.nextElementSibling.textContent=v;
+  });
+  $$("[data-selection-visible]").forEach(el=>el.onchange=()=>setSelectionMenuVisibility(el.dataset.selectionVisible,el.checked));
+  $$("[data-selection-move]").forEach(el=>el.onclick=()=>{const [id,dir]=el.dataset.selectionMove.split(":");moveSelectionMenuItem(id,+dir);});
+  const search=$("#library-search");
+  if(search){ search.oninput=()=>{state.query=search.value;state.visibleCount=60;softRenderLibrary();};}
+  const input=$("#file-input");
+  if(input) input.onchange=()=>importFiles([...input.files]);
+  const drop=$("#import-drop");
+  if(drop){
+    ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag")}));
+    ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag")}));
+    drop.addEventListener("drop",e=>importFiles([...e.dataTransfer.files]));
+  }
+  const dd=$("#default-display"); if(dd)dd.onchange=()=>{state.display=dd.value;setKV("display",state.display);render();};
+  const ds=$("#default-sort"); if(ds)ds.onchange=()=>{state.sort=ds.value;setKV("sort",state.sort);render();};
+  const range=$("#reader-range"); if(range)range.oninput=()=>jumpProgress(+range.value);
+  document.onclick=(e)=>{ if(state.menu && !e.target.closest(".context-menu") && !e.target.closest("[data-menu]")){state.menu=null;render();} };
+  attachSelectionTools();
+}
+
+function softRenderLibrary(){
+  const content=$(".content"); if(!content)return render();
+  const scrollTop=content.scrollTop;
+  content.innerHTML=contentHTML();
+  content.scrollTop=scrollTop;
+  bindContentOnly();
+}
+function bindContentOnly(){
+  $$("[data-open]").forEach(el=>el.onclick=()=>openBook(el.dataset.open));
+  $$("[data-fav]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();toggleFavorite(el.dataset.fav)});
+  $$("[data-status]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();const [id,status]=el.dataset.status.split(":");setStatus(id,status)});
+  $$("[data-menu]").forEach(el=>el.onclick=(e)=>{e.stopPropagation();state.menu={id:el.dataset.menu,x:Math.min(e.clientX,innerWidth-205),y:Math.min(e.clientY,innerHeight-225)};render();});
+  const search=$("#library-search"); if(search){search.focus();search.setSelectionRange(search.value.length,search.value.length);search.oninput=()=>{state.query=search.value;softRenderLibrary();};}
+}
+
+
+function setReaderSidePanel(panel){
+  state.sidePanel=panel;
+  const wrap=document.querySelector(".reader-content-wrap");
+  if(!wrap)return;
+
+  const existing=wrap.querySelector(".reader-side");
+
+  if(!panel){
+    existing?.remove();
+    return;
+  }
+
+  const b=state.books.find(x=>x.id===state.reader?.id);
+  if(!b)return;
+
+  const holder=document.createElement("div");
+  holder.innerHTML=readerSideHTML(b).trim();
+  const next=holder.firstElementChild;
+  if(!next)return;
+
+  if(existing) existing.replaceWith(next);
+  else wrap.appendChild(next);
+
+  bindReaderSidePanelControls(next);
+}
+
+function refreshReaderSidePanel(){
+  if(!state.sidePanel)return;
+  const wrap=document.querySelector(".reader-content-wrap");
+  const existing=wrap?.querySelector(".reader-side");
+  const b=state.books.find(x=>x.id===state.reader?.id);
+  if(!wrap || !existing || !b)return;
+
+  const holder=document.createElement("div");
+  holder.innerHTML=readerSideHTML(b).trim();
+  const next=holder.firstElementChild;
+  if(!next)return;
+
+  existing.replaceWith(next);
+  bindReaderSidePanelControls(next);
+}
+
+function bindReaderSidePanelControls(root){
+  root.querySelectorAll("[data-action]").forEach(el=>{
+    el.onclick=(e)=>handleAction(el.dataset.action,e);
+  });
+
+  root.querySelectorAll("[data-theme]").forEach(el=>{
+    el.onclick=()=>{
+      state.readerSettings.theme=el.dataset.theme;
+      saveReaderSettings();
+      applyReaderThemeLive();
+      refreshReaderSidePanel();
+    };
+  });
+
+  root.querySelectorAll("[data-side-tab]").forEach(el=>{
+    el.onclick=()=>{
+      state.sideTab=el.dataset.sideTab;
+      refreshReaderSidePanel();
+    };
+  });
+
+  root.querySelectorAll("[data-jump]").forEach(el=>el.onclick=()=>jumpProgress(+el.dataset.jump));
+  root.querySelectorAll("[data-anchor]").forEach(el=>el.onclick=()=>jumpAnchor(el.dataset.anchor));
+
+  root.querySelectorAll("[data-reader-setting]").forEach(el=>{
+    el.oninput=()=>{
+      const k=el.dataset.readerSetting;
+      let v=el.value;
+      if(["size","weight","width","margin","line"].includes(k))v=+v;
+      state.readerSettings[k]=v;
+      saveReaderSettings();
+      applyReaderSettingsLive();
+      if(el.nextElementSibling?.tagName==="SPAN")el.nextElementSibling.textContent=v;
+    };
+  });
+
+  root.querySelectorAll("[data-selection-visible]").forEach(el=>{
+    el.onchange=()=>setSelectionMenuVisibility(el.dataset.selectionVisible,el.checked);
+  });
+
