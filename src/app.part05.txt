@@ -1,0 +1,411 @@
+  if(!host)return;
+
+  let selectionTimer=null;
+  let lastPointerType="mouse";
+  let pointerDown=false;
+
+  const scheduleSelectionTools=(delay=null)=>{
+    clearTimeout(selectionTimer);
+    const wait=delay ?? ((lastPointerType==="touch" || lastPointerType==="pen") ? 220 : 55);
+
+    selectionTimer=setTimeout(()=>{
+      if(pointerDown)return;
+
+      const sel=getSelection();
+      const text=sel?.toString().trim();
+      removeSelectionTools();
+
+      if(!text || text.length<2 || !sel.rangeCount)return;
+
+      const range=sel.getRangeAt(0);
+      if(!selectionBelongsToHost(range,host))return;
+
+      const rect=getSelectionVisualRect(range);
+      if(!rect || (!rect.width && !rect.height))return;
+
+      currentSelectionContext=buildSelectionContext(range,text,host);
+      currentSelectionContext.existingHighlight=findHighlightForSelection(currentSelectionContext);
+
+      const div=document.createElement("div");
+      div.className="selection-tools";
+      div.id="selection-tools";
+      positionSelectionMenu(div,rect,lastPointerType);
+      renderSelectionMenu(div,currentSelectionContext);
+      document.body.appendChild(div);
+
+      // Preserve the native PDF.js/browser selection while clicking our menu.
+      div.addEventListener("pointerdown",ev=>{
+        ev.preventDefault();
+        ev.stopPropagation();
+      });
+
+      div.addEventListener("click",ev=>{
+        const btn=ev.target.closest("[data-sel],[data-selection-more],[data-customize-menu]");
+        if(!btn)return;
+
+        if(btn.dataset.selectionMore!==undefined){
+          selectionMoreOpen=!selectionMoreOpen;
+          renderSelectionMenu(div,currentSelectionContext);
+          return;
+        }
+
+        if(btn.dataset.customizeMenu!==undefined){
+          removeSelectionTools();
+          removeTranslationPopover();
+          setReaderSidePanel("menu-customize");
+          return;
+        }
+
+        const act=btn.dataset.sel;
+        if(act)selectionAction(act,currentSelectionContext);
+      });
+    },wait);
+  };
+
+  host.addEventListener("pointerdown",ev=>{
+    pointerDown=true;
+    lastPointerType=ev.pointerType || "mouse";
+    removeSelectionTools();
+
+    // Important: do not preventDefault and do not modify Selection/Range.
+    // PDF.js TextLayerBuilder must receive its own mousedown event.
+  },{passive:true});
+
+  host.addEventListener("pointerup",ev=>{
+    pointerDown=false;
+    lastPointerType=ev.pointerType || lastPointerType;
+    scheduleSelectionTools();
+  },{passive:true});
+
+  host.addEventListener("pointercancel",ev=>{
+    pointerDown=false;
+    lastPointerType=ev.pointerType || lastPointerType;
+    scheduleSelectionTools(260);
+  },{passive:true});
+
+  host.addEventListener("keyup",ev=>{
+    if(ev.shiftKey || ["Shift","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Home","End"].includes(ev.key)){
+      scheduleSelectionTools(60);
+    }
+  });
+
+  document.addEventListener("selectionchange",()=>{
+    const sel=getSelection();
+
+    if(!sel?.rangeCount || sel.isCollapsed){
+      removeSelectionTools();
+      return;
+    }
+
+    const range=sel.getRangeAt(0);
+    if(!selectionBelongsToHost(range,host))return;
+
+    // Do not mutate the range. On touch/pen the platform may continue moving
+    // native selection handles after pointerup.
+    if(!pointerDown){
+      scheduleSelectionTools((lastPointerType==="touch" || lastPointerType==="pen") ? 260 : 90);
+    }
+  });
+}
+function getSelectionVisualRect(range){
+  const rects=[...range.getClientRects()].filter(r=>r.width>0 || r.height>0);
+  if(!rects.length) return range.getBoundingClientRect();
+
+  // Prefer the last selected line, which keeps the toolbar close to the user's
+  // finger/stylus on multi-line selections.
+  const r=rects[rects.length-1];
+  return {
+    left:r.left,
+    right:r.right,
+    top:r.top,
+    bottom:r.bottom,
+    width:r.width,
+    height:r.height
+  };
+}
+
+function positionSelectionMenu(menu,rect,pointerType){
+  const menuWidth=360;
+  const margin=8;
+  const safeLeft=Math.max(margin,Math.min(innerWidth-menuWidth-margin,rect.left));
+  let top=rect.top-52;
+
+  // On touch and pen, place the toolbar below the selection when there is not
+  // enough room above. This also reduces collisions with native handles.
+  if(pointerType==="touch" || pointerType==="pen"){
+    if(top<64) top=rect.bottom+12;
+  }else{
+    top=Math.max(64,top);
+  }
+
+  menu.style.left=`${safeLeft}px`;
+  menu.style.top=`${Math.max(margin,top)}px`;
+  menu.dataset.pointerType=pointerType||"mouse";
+}
+function renderSelectionMenu(container,ctx){
+  const visible=state.selectionMenu.filter(x=>x.visible);
+  const hidden=state.selectionMenu.filter(x=>!x.visible);
+  const primary=visible.map(item=>selectionActionButton(item.id,ctx)).join("");
+  const hiddenButtons=hidden.map(item=>selectionActionButton(item.id,ctx,true)).join("");
+
+  container.innerHTML=`<div class="selection-primary">${primary}
+    <button class="selection-more-btn ${selectionMoreOpen?"active":""}" data-selection-more title="More">•••</button>
+  </div>
+  ${selectionMoreOpen?`<div class="selection-more-menu">
+    ${hiddenButtons || '<div class="selection-more-empty">All actions are already visible</div>'}
+    <button class="selection-more-item customize" data-customize-menu>Customize menu…</button>
+  </div>`:""}`;
+}
+
+function selectionActionButton(id,ctx,inMore=false){
+  let label=SELECTION_ACTIONS[id]?.label||id;
+  if(id==="highlight" && ctx.existingHighlight) label="Remove highlight";
+  const cls=inMore?"selection-more-item":"";
+  return `<button class="${cls}" data-sel="${id}">${escapeHTML(label)}</button>`;
+}
+
+function buildSelectionContext(range,text,host){
+  const progress=getSelectionProgress(range);
+  if(host.id==="reader-page"){
+    const offsets=getRangeTextOffsets(host,range);
+    return {kind:"reflow",text,progress,rangeStart:offsets.start,rangeEnd:offsets.end};
+  }
+
+  const rects=getPDFSelectionRects(range);
+  return {kind:"pdf",text,progress,rects,pages:[...new Set(rects.map(r=>r.page))]};
+}
+
+function getRangeTextOffsets(host,range){
+  const pre=document.createRange();
+  pre.selectNodeContents(host);
+  pre.setEnd(range.startContainer,range.startOffset);
+  const start=pre.toString().length;
+  return {start,end:start+range.toString().length};
+}
+
+function getPDFSelectionRects(range){
+  const pages=[...document.querySelectorAll(".pdf-page")].map(page=>({page,box:page.getBoundingClientRect()}));
+  const result=[];
+  for(const rect of range.getClientRects()){
+    if(rect.width<1 || rect.height<1) continue;
+    const cx=rect.left+rect.width/2, cy=rect.top+rect.height/2;
+    const match=pages.find(x=>cx>=x.box.left-1&&cx<=x.box.right+1&&cy>=x.box.top-1&&cy<=x.box.bottom+1);
+    if(!match)continue;
+    result.push({
+      page:+match.page.dataset.page,
+      x:(rect.left-match.box.left)/match.box.width,
+      y:(rect.top-match.box.top)/match.box.height,
+      w:rect.width/match.box.width,
+      h:rect.height/match.box.height
+    });
+  }
+  return result;
+}
+
+function findHighlightForSelection(ctx){
+  const b=state.books.find(x=>x.id===state.reader?.id); if(!b)return null;
+  const list=b.highlights||[];
+  if(ctx.kind==="reflow"){
+    return list.find(h=>h.kind==="reflow" && h.start<ctx.rangeEnd && h.end>ctx.rangeStart) || null;
+  }
+  return list.find(h=>h.kind==="pdf" && pdfHighlightOverlaps(h,ctx.rects)) || null;
+}
+
+function pdfHighlightOverlaps(highlight,rects){
+  for(const a of highlight.rects||[]){
+    for(const b of rects||[]){
+      if(a.page!==b.page)continue;
+      const ix=Math.max(0,Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x));
+      const iy=Math.max(0,Math.min(a.y+a.h,b.y+b.h)-Math.max(a.y,b.y));
+      if(ix*iy>0.00002)return true;
+    }
+  }
+  return false;
+}
+
+function selectionBelongsToHost(range,host){
+  const node=range.commonAncestorContainer.nodeType===Node.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement;
+  return !!node && host.contains(node);
+}
+
+function getSelectionProgress(range){
+  const b=state.books.find(x=>x.id===state.reader?.id);
+  const fallback=b?.progress||0;
+  const node=range.commonAncestorContainer.nodeType===Node.ELEMENT_NODE
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement;
+  const page=node?.closest?.(".pdf-page");
+  const host=$("#pdf-pages");
+  const total=Number(host?.dataset.pdfPages||0);
+
+  if(page && total>0){
+    const n=Number(page.dataset.page||1);
+    return Math.max(0,Math.min(100,((n-.5)/total)*100));
+  }
+  return fallback;
+}
+
+function removeSelectionTools(){
+  $("#selection-tools")?.remove();
+  selectionMoreOpen=false;
+}
+
+async function selectionAction(action,ctx){
+  const b=state.books.find(x=>x.id===state.reader?.id);if(!b||!ctx)return;
+
+  if(action==="highlight"){
+    b.highlights=b.highlights||[];
+    const existing=findHighlightForSelection(ctx);
+    if(existing){
+      b.highlights=b.highlights.filter(h=>h.id!==existing.id);
+      await putBook(b);
+      toast("Highlight removed");
+    }else{
+      const h={
+        id:crypto.randomUUID(),
+        kind:ctx.kind,
+        text:ctx.text.slice(0,1500),
+        progress:ctx.progress,
+        color:state.readerSettings.highlightColor||"#f4d35e",
+        createdAt:Date.now()
+      };
+      if(ctx.kind==="reflow"){h.start=ctx.rangeStart;h.end=ctx.rangeEnd;}
+      else h.rects=ctx.rects;
+      b.highlights.push(h);
+      await putBook(b);
+      toast("Highlighted");
+    }
+
+    getSelection()?.removeAllRanges();
+      removeSelectionTools();
+
+    if(ctx.kind==="pdf"){
+      refreshPDFHighlightsInPlace(b);
+    }else{
+      render(true);
+    }
+    return;
+  }
+
+  if(action==="translate"){
+    showTranslationPopover(ctx.text);
+    removeSelectionTools();
+    return;
+  }
+
+  if(action==="copy"){
+    try{
+      if(navigator.clipboard?.writeText) await navigator.clipboard.writeText(ctx.text);
+      else throw new Error("Clipboard API unavailable");
+      toast("Copied");
+    }catch{
+      toast("Text selected — use Ctrl/Cmd+C to copy");
+    }
+    removeSelectionTools();
+    return;
+  }
+
+  let note="";
+  if(action==="note") note=prompt("Add note:")||"";
+  b.quotes=b.quotes||[];
+  b.quotes.push({
+    text:ctx.text.slice(0,700),
+    note,
+    progress:ctx.progress,
+    createdAt:Date.now()
+  });
+  await putBook(b);
+  toast(action==="note"?"Note saved":"Quote saved");
+  getSelection()?.removeAllRanges();
+  removeSelectionTools();
+}
+
+function applyReflowHighlights(book){
+  const host=$("#reader-page");
+  if(!host)return;
+  const highlights=(book.highlights||[]).filter(h=>h.kind==="reflow").sort((a,b)=>b.start-a.start);
+  for(const h of highlights) wrapTextRange(host,h.start,h.end,h);
+}
+
+function wrapTextRange(host,start,end,highlight){
+  const walker=document.createTreeWalker(host,NodeFilter.SHOW_TEXT);
+  const nodes=[];
+  let offset=0,node;
+  while(node=walker.nextNode()){
+    if(node.parentElement?.closest(".reader-highlight"))continue;
+    const len=node.nodeValue.length;
+    nodes.push({node,start:offset,end:offset+len});
+    offset+=len;
+  }
+
+  const affected=nodes.filter(n=>n.end>start && n.start<end);
+  for(const entry of affected.reverse()){
+    const localStart=Math.max(0,start-entry.start);
+    const localEnd=Math.min(entry.node.nodeValue.length,end-entry.start);
+    if(localEnd<=localStart)continue;
+    const range=document.createRange();
+    range.setStart(entry.node,localStart);
+    range.setEnd(entry.node,localEnd);
+    const mark=document.createElement("mark");
+    mark.className="reader-highlight";
+    mark.dataset.highlightId=highlight.id;
+    mark.style.setProperty("--highlight-color",highlight.color||"#f4d35e");
+    range.surroundContents(mark);
+  }
+}
+
+function applyPDFHighlightsToPage(book,pageEl,pageNumber){
+  const layer=pageEl.querySelector(".pdf-highlight-layer"); if(!layer)return;
+  layer.replaceChildren();
+  for(const h of (book.highlights||[]).filter(h=>h.kind==="pdf")){
+    for(const r of (h.rects||[]).filter(r=>r.page===pageNumber)){
+      const el=document.createElement("div");
+      el.className="pdf-highlight-rect";
+      el.dataset.highlightId=h.id;
+      el.style.left=`${r.x*100}%`;
+      el.style.top=`${r.y*100}%`;
+      el.style.width=`${r.w*100}%`;
+      el.style.height=`${r.h*100}%`;
+      el.style.background=h.color||"#f4d35e";
+      layer.appendChild(el);
+    }
+  }
+}
+function refreshPDFHighlightsInPlace(book){
+  // Do not rebuild PDF canvases. Only repaint the lightweight highlight overlays
+  // for pages that are already rendered, which prevents black flashes/flicker.
+  document.querySelectorAll(".pdf-page").forEach(pageEl=>{
+    if(!pageEl.querySelector(".pdf-highlight-layer")) return;
+    const pageNumber=Number(pageEl.dataset.page||0);
+    if(pageNumber>0) applyPDFHighlightsToPage(book,pageEl,pageNumber);
+  });
+}
+
+function removeTranslationPopover(){$("#translation-popover")?.remove();}
+
+async function showTranslationPopover(text){
+  removeTranslationPopover();
+  const pop=document.createElement("div");
+  pop.id="translation-popover";
+  pop.className="translation-popover";
+  const target=state.readerSettings.translationTarget||"es";
+  pop.innerHTML=`<div class="translation-head"><strong>Translation</strong><button type="button" data-close-translation>×</button></div>
+    <div class="translation-source">${escapeHTML(text.slice(0,500))}</div>
+    <div class="translation-result">Translating…</div>
+    <div class="translation-meta">Target: ${escapeHTML(target.toUpperCase())}</div>`;
+  document.body.appendChild(pop);
+  pop.querySelector("[data-close-translation]").onclick=removeTranslationPopover;
+
+  try{
+    const translated=await translateText(text,target);
+    const result=pop.querySelector(".translation-result");
+    if(result)result.textContent=translated;
+  }catch(err){
+    const result=pop.querySelector(".translation-result");
+    if(result)result.innerHTML=`Translation service unavailable.<br><span class="translation-error">${escapeHTML(err.message||String(err))}</span>`;
+  }
+}
+
+async function translateText(text,target){
