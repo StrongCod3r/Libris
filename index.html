@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#006d7d" />
   <meta name="color-scheme" content="light dark" />
   <title>Libris — Browser Reader</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/pdf_viewer.css" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -13,8 +14,8 @@
 
   <!-- Optional EPUB support. The app still works without this script for TXT/MD/HTML/PDF. -->
   <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/pdf.min.mjs" type="module"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/6.3.289/pdf_viewer.mjs" type="module"></script>
   <script type="module" src="./app.js"></script>
 </body>
 </html>
